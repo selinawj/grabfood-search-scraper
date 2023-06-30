@@ -1,54 +1,91 @@
-from bs4 import BeautifulSoup
-from urllib.request import Request, urlopen
-import json
-import ssl
-import urllib
-import pandas as pd
-from selenium import webdriver
 import time
+import pandas as pd
+import re
+import requests
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException
 
 
-headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36',
-    "Content-Type": "application/x-www-form-urlencoded"} # set the headers
-ssl._create_default_https_context = ssl._create_unverified_context
+### Setup Driver ###
+url = "https://food.grab.com/sg/en/restaurants?search=wings&lng=en&support-deeplink=true&searchParameter=wings"
+chrome_options = webdriver.ChromeOptions()
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36 Edge/17.17134"
+chrome_options.add_argument(f'user-agent={user_agent}')
+chrome_options.add_argument("--incognito")
+chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+driver = webdriver.Chrome(options=chrome_options)
+driver.get(url)
 
-data = {}
-city = "New-York-City"
-# url = "https://www.ubereats.com/city/" + city.lower()
-url = "https://www.ubereats.com/_p/api/getFeedV1"
-# url = "https://www.ubereats.com/search?diningMode=DELIVERY&pl=JTdCJTIyYWRkcmVzcyUyMiUzQSUyMk5vLiUyMDMzMyUyQyUyMER1bkh1YSUyME4lMjBSZCUyMiUyQyUyMnJlZmVyZW5jZSUyMiUzQSUyMkNoSUpIOVd6dk8tclFqUVJNNTY2bFVpVmRtOCUyMiUyQyUyMnJlZmVyZW5jZVR5cGUlMjIlM0ElMjJnb29nbGVfcGxhY2VzJTIyJTJDJTIybGF0aXR1ZGUlMjIlM0EyNS4wNTk1Njg3JTJDJTIybG9uZ2l0dWRlJTIyJTNBMTIxLjU1MDE0NTglN0Q%3D&q=tea&sc=SEARCH_SUGGESTION&vertical=ALL"
-req = Request(url, headers=headers)
-page = urlopen(req).read()
-soup = BeautifulSoup(page, 'html.parser')
+### Accept Cookies ###
+try:
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "Accept")]'))).click()
+except TimeoutException:
+    pass
 
-vendornames = []
-vendorimages = []
-vendorurls = []
+### Scroll to bottom ###
+last_height = driver.execute_script("return document.body.scrollHeight")
+while True:
+    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+    time.sleep(2)
+    new_height = driver.execute_script("return document.body.scrollHeight")
+    if new_height == last_height:
+        break
+    last_height = new_height
 
-for x in soup.findAll("div", {"class": "af cx cu f9 eq er es et"}):
-    print (x)
-    for y in x:
-        print (y.text)
-for x in soup.select("h3[class^=be]"): # find the name of the restaurant
-    vendor_name = x.text
-    vendornames.append(vendor_name)
+### Extract Restaurant Data ###
+layout_div = driver.find_element(By.CSS_SELECTOR, '.ant-layout')
+# container = driver.find_elements(By.CSS_SELECTOR, '.ant-col-24')
 
-print (len(vendornames))
+restaurant_names = layout_div.find_elements(By.CSS_SELECTOR, '.name___2epcT')
+cuisine_names = layout_div.find_elements(By.CSS_SELECTOR, '.basicInfoRow___UZM8d.cuisine___T2tCh')
 
-for x in soup.findAll('a', {"class": "al ak br c8 iq bs am fz g8 ir gt"}):
-for x in soup.select("a[class^=al][data-test^=store-link]"): # find vendor url of restaurant
-    base_url = "https://www.ubereats.com"
-    vendor_url = base_url + x.get('href')
-    vendorurls.append(vendor_url)
+image_elements = driver.find_elements(By.XPATH, "//img[contains(@class, 'realImage___2TyNE')]")
+img_url_list = []
+for img in image_elements:
+    img_url = img.get_attribute("src")
+    # if img_url is not None:
+        # if img_url.endswith('.webp'):
+    img_url_list.append(img_url)
+# print(len(img_url_list))
 
-print(len(vendorurls))
-# for x in soup.findAll('a', {"class": "al ak br c8 iq bs am fz g8 ir gt"}):
-# for x in soup.findAll('div', {"class": "al br is it"}):
-#     vendor_img = x.find('img').attrs['src']
-#     vendorimages.append(vendor_img)
 
-print (vendornames)
-output_df = pd.DataFrame({'vendor_names': vendornames, 'vendor_urls': vendorurls})
+vendor_url = driver.find_elements(By.XPATH, "//a[contains(@href, '/sg/en/restaurant')]")
+url_elements_list = []
+for url_element in vendor_url:
+    url_elements_list.append(url_element.get_attribute("href"))
+# url_elements_list = url_elements_list[10:]
 
-output_df.to_csv("ubereats_res.csv", index=False)
-print ("output saved")
+# for item in container:
+
+
+### Convert to lists ###
+names = [name.text for name in restaurant_names]
+cuisines = [cuisines_name.text for cuisines_name in cuisine_names]
+
+
+#select first 100 results
+names = names[:100]
+cuisines = cuisines[:100]
+url_elements_list = url_elements_list[:100]
+img_url_list = img_url_list[:100]
+print(len(names))
+print(len(cuisines))
+print(len(img_url_list))
+print(len(url_elements_list))
+# resto_names = pd.DataFrame({'restaurant_names': names})
+# resto_url = pd.DataFrame({'restaurant_urls': url_elements_list})
+# resto_img = pd.DataFrame({'restaurant_img': img_url_list})
+
+# resto_names.to_csv("resto_names.csv", index=False)
+# resto_url.to_csv("resto_url.csv", index=False)
+# resto_img.to_csv("resto_img.csv", index=False)
+
+grab_resto = pd.DataFrame({
+'restaurant_names': names, 'cuisine_names': cuisines, 'vendor_urls': url_elements_list, 'vendor_img': img_url_list})
+grab_resto.to_csv("test_grab_res.csv", index=False)
